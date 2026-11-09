@@ -88,6 +88,7 @@ nav button.on{color:var(--pri)}
 .main.good,.main.bad{color:#fff}
 #toast{position:fixed;left:16px;right:16px;bottom:100px;max-width:448px;margin:0 auto;background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}#toast.show{opacity:1}
 .row select{font:inherit;background:var(--bg);color:var(--ink);border:2px solid var(--line);border-radius:10px;padding:6px;max-width:170px}
+.r{display:block;margin-top:6px;font-weight:700}.r.ok{color:var(--ok)}.r.bad{color:var(--bad)}
 </style></head>
 <body><div id="app"></div>
 <script>
@@ -145,26 +146,34 @@ function toast(m){
   if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}
   t.textContent=m;t.className='show';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.className=''},9000);
 }
+const sp=s=>{s=String(s).trim().toLowerCase();return/^[a-z]+$/.test(s)?s.replace(/shi/g,'si').replace(/chi/g,'ti').replace(/tsu/g,'tu').replace(/fu/g,'hu'):null};
+const rvars=r=>[...new Set([r,r.replace(/ou/g,'o'),r.replace(/ou/g,'oo')].map(sp))];
 const KR={'一':'いち','二':'に','三':'さん','四':'よん','五':'ご','日':'ひ','月':'つき','火':'ひ','水':'みず','木':'き','人':'ひと','口':'くち','山':'やま','川':'かわ','大':'だい'};
 const jaVoices=()=>{try{return speechSynthesis.getVoices().filter(v=>v.lang.replace('_','-').toLowerCase().startsWith('ja'))}catch(e){return[]}};
 const vScore=v=>(/google/i.test(v.name)?5:0)+(/neural|natural|enhanced|premium|wavenet|online/i.test(v.name)?3:0)+(v.localService===false?2:0)+(/kyoko|haruka|nanami|ayumi|o-ren|sayaka|female/i.test(v.name)?1:0)-(/compact/i.test(v.name)?3:0);
-function pickVoice(){const l=jaVoices();return l.find(v=>v.name===S.vname)||[...l].sort((a,b)=>vScore(b)-vScore(a))[0]}
+const isOff=()=>typeof navigator!=='undefined'&&navigator.onLine===false;
+const isLocal=v=>v.localService!==false;
+function pickVoice(){let l=jaVoices();if(isOff()&&l.some(isLocal))l=l.filter(isLocal);return l.find(v=>v.name===S.vname)||[...l].sort((a,b)=>vScore(b)-vScore(a))[0]}
 let vWarned=0;
 function say(t,f,tried,err){
   tried=tried||[];
   if(!S.voice&&!f)return;
   if(typeof speechSynthesis==='undefined'||typeof SpeechSynthesisUtterance==='undefined'){if(f)toast('Voice is not supported in this app. Open the link in Chrome instead.');return}
-  const list=[pickVoice(),...jaVoices()].filter((x,i,a)=>x&&a.indexOf(x)===i);
+  const off=isOff(),rest=jaVoices().sort((a,b)=>off?isLocal(b)-isLocal(a):0);
+  const list=[pickVoice(),...rest].filter((x,i,a)=>x&&a.indexOf(x)===i);
   const v=list.find(x=>!tried.includes(x));
   if(!v&&tried.includes('d')){
-    if(f||!vWarned){vWarned=1;toast((list.length?'Voice did not play'+(err&&err.error?' ('+err.error+')':''):'No Japanese voice found')+'. On your phone: Settings, Text-to-speech output, Google, Install voice data, Japanese. Then restart the phone.')}
+    if(f||!vWarned){vWarned=1;toast((list.length?'Voice did not play'+(err&&err.error?' ('+err.error+')':''):'No Japanese voice found')+(off?'. You are offline: download the Japanese voice data while online (Settings, Text-to-speech output, Google, Install voice data, Japanese).':'. On your phone: Settings, Text-to-speech output, Google, Install voice data, Japanese. Then restart the phone.'))}
     return;
   }
   try{
     speechSynthesis.cancel();speechSynthesis.resume();
     const u=new SpeechSynthesisUtterance(KR[t]||t);u.lang='ja-JP';u.rate=S.rate||.8;u.pitch=1;u.volume=1;if(v)u.voice=v;
-    u.onerror=e=>{if(tried.length<8)say(t,f,[...tried,v||'d'],e)};
+    let st=0;
+    u.onstart=()=>{if(!st)st=1};
+    u.onerror=e=>{if(st===2||(e&&(e.error==='interrupted'||e.error==='canceled')))return;st=2;if(tried.length<8)say(t,f,[...tried,v||'d'],e)};
     setTimeout(()=>{try{speechSynthesis.speak(u)}catch(e){}},80);
+    if(v&&!isLocal(v))setTimeout(()=>{if(!st){st=2;try{speechSynthesis.cancel()}catch(e){}if(tried.length<8)say(t,f,[...tried,v],{error:'timeout'})}},4000);
   }catch(e){if(f)toast('Voice error. Try opening the link in Chrome.')}
 }
 let AC;
@@ -213,8 +222,8 @@ function prof(){
   <div class="row">Voice speed<span>${[['Slow',.6],['Normal',.8],['Fast',1]].map(r=>`<button class="${(S.rate||.8)===r[1]?'on':''}" onclick="S.rate=${r[1]};save();prof();say('こんにちは',1)">${r[0]}</button>`).join(' ')}</span></div>
   ${jaVoices().length?`<div class="row">Voice<select aria-label="Japanese voice" onchange="S.vname=this.value;save();say('こんにちは',1)"><option value="">Auto (best)</option>${jaVoices().map(v=>`<option value="${esc(v.name)}" ${S.vname===v.name?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div>`:''}
   <div class="row">Test the voice<button onclick="say('こんにちは',1)">Play</button></div>
-  <p class="note">Voice status: ${typeof speechSynthesis==='undefined'?'not supported in this app. Open the link in Chrome.':hasJa()?'Japanese voice found.':'no Japanese voice found.'}${typeof speechSynthesis!=='undefined'&&!hasJa()?' On Android: Settings, Languages and input, Text-to-speech output, choose Google, tap its settings icon, Install voice data, then Japanese. If Google is missing, install Speech Recognition and Synthesis from Google on Play Store (free).':''}</p>
-  <p class="hd">How Kotoba is different</p><p class="note">No hearts, ads, leagues or paywall. Wrong answers simply come back later. Your streak survives one missed day. Grammar notes, both kanji readings and speaking practice are built in. Your data stays on this device.</p><button class="alt" onclick="rst(this)">Reset progress</button>${nav()}`;
+  <div class="row">Voice check (shows errors)<button onclick="vcheck()">Open</button></div><p class="note">Voice status: ${typeof speechSynthesis==='undefined'?'not supported in this app. Open the link in Chrome.':hasJa()?'Japanese voice found ('+jaVoices().filter(isLocal).length+' work offline).':'no Japanese voice found.'}${typeof speechSynthesis!=='undefined'&&!hasJa()?' On Android: Settings, Languages and input, Text-to-speech output, choose Google, tap its settings icon, Install voice data, then Japanese. If Google is missing, install Speech Recognition and Synthesis from Google on Play Store (free).':''}</p>
+  <p class="hd">How Kotoba is different</p><p class="note">No hearts, ads, leagues or paywall. Wrong answers simply come back later. Your streak survives one missed day. Grammar notes, both kanji readings and speaking practice are built in. Your data stays on this device.</p><button class="alt" onclick="rst(this)">Reset progress</button><p class="note" style="text-align:center">Kotoba version 9 Nov 2026: Learn, Cards, Write, JLPT, Voice check</p>${nav()}`;
 }
 const gain=n=>{S.xp+=n;S.today+=n;S.hist[day()]=(S.hist[day()]||0)+n};
 const segs=(k,fn,keys)=>`<div class="seg">${keys.map(c=>`<button class="${S[k]===c?'on':''}" onclick="S.${k}='${c}';save();${fn}()">${CAT[c]}</button>`).join('')}</div>`;
@@ -333,6 +342,30 @@ function jfin(){
   const pct=Math.round(jok/JL.length*100);S.jb=S.jb||{};S.jb[jm]=Math.max(S.jb[jm]||0,pct);save();sfx(1);
   A.innerHTML=`<div class="les" style="padding-top:70px"><div class="big" style="font-size:52px">${jok} / ${JL.length}</div><p class="sub">${pct}% correct</p><p class="note">This is practice, not a prediction of your real JLPT score. Review what you missed in the Cards and Learn tabs.</p></div><div id="fb"><div class="fb two"><button class="alt" style="margin:0" onclick="jstart('${jm}')">Try again</button><button class="main" onclick="jlpt()">Done</button></div></div>`;
 }
+function vtest(v,o){
+  o.className='r';o.textContent='Trying...';
+  try{
+    speechSynthesis.cancel();speechSynthesis.resume();
+    const u=new SpeechSynthesisUtterance('こんにちは');u.lang='ja-JP';u.rate=.8;if(v)u.voice=v;
+    let st=0;
+    u.onstart=()=>{st=1;o.textContent='Playing. If you hear it, this voice works.';o.className='r ok'};
+    u.onend=()=>{if(st)o.textContent='Finished. Did you hear it?'};
+    u.onerror=e=>{o.textContent='FAILED: '+((e&&e.error)||'unknown');o.className='r bad'};
+    setTimeout(()=>speechSynthesis.speak(u),80);
+  }catch(e){o.textContent='FAILED: '+e;o.className='r bad'}
+}
+function vcheck(){
+  view='prof';const all=jaVoices(),n=typeof speechSynthesis==='undefined'?0:speechSynthesis.getVoices().length;
+  A.innerHTML=`<header><span class="logo">Voice check</span></header><p class="note">${isOff()?'You are offline.':'You are online.'} Voices on this phone: ${n}. Japanese voices: ${all.length}. Tap Play on each line and note the result.</p><div id="vl"></div><button class="alt" onclick="prof()">Back to Profile</button>${nav()}`;
+  const L=document.getElementById('vl');
+  [null,...all].forEach(v=>{
+    const d=document.createElement('div');d.className='row';d.style.cssText='flex-direction:column;align-items:flex-start';
+    const t=document.createElement('b');t.textContent=v?v.name+' ('+v.lang+', '+(isLocal(v)?'offline':'online')+')':'Default voice (the phone chooses)';
+    const b=document.createElement('button');b.textContent='Play';
+    const o=document.createElement('span');o.className='r';
+    b.onclick=()=>vtest(v,o);d.append(t,b,o);L.append(d);
+  });
+}
 let rc=0;
 function rst(b){if(!rc){rc=1;b.textContent='Tap again to erase everything';return}rc=0;const n=S.name;S=fresh();S.name=n;save();home()}
 function start(n){if(D[n][1]==='s'){const q=D[n][4].split(';').map(s=>{const[a,b]=s.split('|');return{t:'s',tiles:a.split(' '),en:b}});unit=n;lim=n;Q=[{t:'n'},...shuffle(q)];total=q.length;ok=0;err=0;return next()}run(ALL.filter(x=>x.u===n),n)}
@@ -383,7 +416,7 @@ function choose(i){
 function chk(){
   if(done)return;const v=document.getElementById('inp').value;if(!v.trim())return;
   document.getElementById('inp').disabled=true;
-  const it=cur.it;fb(v.trim()===it.j||it.r.split('|').some(r=>nz(r)===nz(v)),it.r.split('|').join(' or '));
+  const it=cur.it,sv=sp(v);fb(v.trim()===it.j||(sv!==null&&it.r.split('|').some(r=>rvars(r).includes(sv))),it.r.split('|').join(' or '));
 }
 function fb(good,shown){
   done=true;const it=cur.it||{j:cur.tiles.join('')};
